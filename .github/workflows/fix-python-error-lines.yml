@@ -1,0 +1,89 @@
+name: Fix Python student error lines
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-python-error-lines.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch index.html
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+
+          old_pattern = r'function friendlyError\(err\)\{.*?\}\nasync function runLevel'
+          replacement = r'''function friendlyError(err){
+            const s=String(err);
+            // 只認「學生程式」的 traceback 行號，不再顯示 Pyodide / 網站內部的 597 行之類數字。
+            const m=s.match(/File ["']<學生程式>["'], line (\d+)/);
+            const line=m?Number(m[1]):null;
+            const where=line?`（第 ${line} 行）`:"";
+
+            if(s.includes("IndentationError"))
+              return `縮排錯誤${where}：看看 if / def 下一行有沒有縮排 4 個空格。`;
+
+            if(s.includes("SyntaxError"))
+              return `Python 語法錯誤${where}：檢查冒號 :、括號，以及 += / -= 有沒有寫在一起。`;
+
+            if(s.includes("NameError")){
+              const nm=(s.match(/name ["']([^"']+)["'] is not defined/)||[])[1];
+              if(nm==="randrange")
+                return `找不到 randrange${where}。你前面用了 import random，所以要寫 random.randrange(...)。`;
+              return `找不到${nm?`「${nm}」`:"這個名稱"}${where}：可能是拼錯字，或少寫了物件名稱。`;
+            }
+
+            if(s.includes("UnboundLocalError"))
+              return `這個變數在函式裡被修改${where}，可能需要加 global。`;
+
+            if(s.includes("AttributeError"))
+              return `物件沒有你寫的這個屬性${where}。檢查看看 x / y / key 名稱有沒有拼錯。`;
+
+            return `Python 執行時發生錯誤${where}。\n\n`+s.split("\n").slice(-4).join("\n");
+          }
+          async function runLevel'''
+
+          s2, n = re.subn(old_pattern, replacement, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit(f'friendlyError patch failed: {n}')
+
+          old = 'await pyodide.runPythonAsync(editors[i].getValue());'
+          new = '''pyodide.globals.set("__student_code",editors[i].getValue());await pyodide.runPythonAsync('exec(compile(__student_code, "<學生程式>", "exec"), globals())');'''
+          if old not in s2:
+              raise SystemExit('student execution patch target not found')
+          s2 = s2.replace(old, new, 1)
+
+          p.write_text(s2, encoding='utf-8')
+
+      - name: Check JavaScript syntax
+        shell: python
+        run: |
+          from pathlib import Path
+          import re, subprocess
+          s=Path('index.html').read_text(encoding='utf-8')
+          blocks=re.findall(r'<script>([\s\S]*?)</script>',s)
+          Path('/tmp/site.js').write_text(blocks[-1],encoding='utf-8')
+          subprocess.run(['node','--check','/tmp/site.js'],check=True)
+
+      - name: Commit fix
+        run: |
+          git config user.name "python-teacher-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html
+          git commit -m "Fix Python error line mapping" || exit 0
+          git push
