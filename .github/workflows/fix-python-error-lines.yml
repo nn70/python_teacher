@@ -58,7 +58,7 @@ jobs:
           }
           async function runLevel'''
 
-          s2, n = re.subn(old_pattern, replacement, s, count=1, flags=re.S)
+          s2, n = re.subn(old_pattern, lambda _m: replacement, s, count=1, flags=re.S)
           if n != 1:
               raise SystemExit(f'friendlyError patch failed: {n}')
 
