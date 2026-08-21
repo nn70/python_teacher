@@ -34,13 +34,32 @@ jobs:
                   raise SystemExit('BOOT marker not found')
               s = s.replace(marker, repl, 1)
 
-          # 執行前自動整理縮排：Tab -> 4 spaces，特殊空白 -> 普通空格
+          # 執行前自動整理縮排
           old = 'pyodide.globals.set("__student_code",editors[i].getValue());await pyodide.runPythonAsync(\'exec(compile(__student_code, "<學生程式>", "exec"), globals())\');'
           new = 'let __student=editors[i].getValue().replace(/\\t/g,"    ").replace(/\\u00a0/g," ");editors[i].setValue(__student,-1);pyodide.globals.set("__student_code",__student);await pyodide.runPythonAsync(\'exec(compile(__student_code, "<學生程式>", "exec"), globals())\');'
           if old in s:
               s = s.replace(old, new, 1)
-          elif 'let __student=editors[i].getValue().replace(/\\t/g,"    ")' not in s:
-              raise SystemExit('student execution target not found')
+
+          # 打磚塊：內建球拍控制；球掉出底部後自動重生，避免遊戲卡死
+          old_breakout = 'engine:`def __engine_step():\\n    move_ball()\\n    wall_check()\\n    paddle_check()\\n    for brick in bricks:\\n        brick_check(brick)\\ndef __state():\\n    return json.dumps({"ball":[ball.x,ball.y],"paddle":[paddle.x,paddle.y],"bricks":[[b.x,b.y,b.hidden] for b in bricks],"score":score,"vy":ball_vy})`'
+          new_breakout = 'engine:`def __engine_step():\\n    global ball_vx, ball_vy\\n    if key.right:\\n        paddle.x += 8\\n    if key.left:\\n        paddle.x -= 8\\n    paddle.x = max(0, min(420, paddle.x))\\n    move_ball()\\n    wall_check()\\n    paddle_check()\\n    for brick in bricks:\\n        brick_check(brick)\\n    if ball.y > 410:\\n        ball.x = 253\\n        ball.y = 250\\n        ball_vx = 4\\n        ball_vy = -4\\ndef __state():\\n    return json.dumps({"ball":[ball.x,ball.y],"paddle":[paddle.x,paddle.y],"bricks":[[b.x,b.y,b.hidden] for b in bricks],"score":score,"vy":ball_vy})`'
+          if old_breakout in s:
+              s = s.replace(old_breakout, new_breakout, 1)
+          elif 'if ball.y > 410:' not in s:
+              raise SystemExit('breakout engine target not found')
+
+          # 青蛙過馬路：方向鍵只在「剛按下」時跳一格，不再每 55ms 連跳
+          old_frog_setup = 'setup:`frog=Sprite(245,350,28,28)\\ncars=[Sprite(40,260,56,28),Sprite(330,210,56,28),Sprite(130,160,56,28),Sprite(400,110,56,28)]\\ncar_v=[5,-6,5,-7]`'
+          new_frog_setup = 'setup:`frog=Sprite(245,350,28,28)\\ncars=[Sprite(40,260,56,28),Sprite(330,210,56,28),Sprite(130,160,56,28),Sprite(400,110,56,28)]\\ncar_v=[5,-6,5,-7]\\n__frog_prev=(False,False,False,False)`'
+          if old_frog_setup in s:
+              s = s.replace(old_frog_setup, new_frog_setup, 1)
+
+          old_frog_engine = 'engine:`def __engine_step():\\n    move_frog()\\n    for i,car in enumerate(cars):\\n        car.x += car_v[i]\\n        if car.x > 540: car.x=-70\\n        if car.x < -70: car.x=540\\n        hit_car(car)\\n    goal_check()\\ndef __state():\\n    return json.dumps({"frog":[frog.x,frog.y],"cars":[[c.x,c.y] for c in cars],"score":score,"life":life})`'
+          new_frog_engine = 'engine:`def __engine_step():\\n    global __frog_prev\\n    now=(key.up,key.down,key.left,key.right)\\n    pressed=any(a and not b for a,b in zip(now,__frog_prev))\\n    if pressed:\\n        move_frog()\\n        frog.x=max(0,min(492,frog.x))\\n        frog.y=max(0,min(372,frog.y))\\n    __frog_prev=now\\n    for i,car in enumerate(cars):\\n        car.x += car_v[i]\\n        if car.x > 540: car.x=-70\\n        if car.x < -70: car.x=540\\n        hit_car(car)\\n    goal_check()\\ndef __state():\\n    return json.dumps({"frog":[frog.x,frog.y],"cars":[[c.x,c.y] for c in cars],"score":score,"life":life})`'
+          if old_frog_engine in s:
+              s = s.replace(old_frog_engine, new_frog_engine, 1)
+          elif '__frog_prev' not in s:
+              raise SystemExit('frog engine target not found')
 
           p.write_text(s, encoding='utf-8')
 
@@ -59,5 +78,5 @@ jobs:
           git config user.name "python-teacher-bot"
           git config user.email "actions@users.noreply.github.com"
           git add index.html
-          git commit -m "Normalize student indentation before Python run" || exit 0
+          git commit -m "Fix Breakout and Frogger engines" || exit 0
           git push
